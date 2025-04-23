@@ -5,3 +5,4 @@ yt-dlp
 pydub
 moviepy
 requests
+ffmpeg-python
