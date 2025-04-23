@@ -5,12 +5,13 @@ import subprocess
 from pydub import AudioSegment
 from moviepy import VideoFileClip, AudioFileClip, ImageClip
 import pickle
-from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginError
+from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginError, ClientCheckpointChallengeError
 from google import genai
 from google.genai.types import HttpOptions, Content, Part
 from PIL import Image
 import io
 import ffmpeg  # Import the ffmpeg Python wrapper
+import time
 
 # --- Fallback for Local Development ---
 # Use default values when secrets are not available (for local development)
@@ -28,7 +29,7 @@ def save_session(api):
     try:
         with open(SESSION_FILE, 'wb') as f:
             pickle.dump({'cookie': api.cookie_jar, 'settings': api.settings}, f)
-        st.success("Session saved successfully.")  # Add success message
+        st.success("Session saved successfully.")
     except Exception as e:
         st.error(f"Error saving session: {e}")
 
@@ -46,38 +47,49 @@ def load_session():
             return api
     except FileNotFoundError:
         st.info("Session file not found.  Will attempt login.")
-        return None  # Return None if the file doesn't exist
+        return None
     except Exception as e:
         st.error(f"Error loading session: {e}")
         return None
 
-def login():
-    try:
-        api = Client(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-        save_session(api)
-        st.success("Logged in successfully.")
-        return api
-    except ClientLoginError as e:
-        st.error(f"Login error: {e}")
-        return None  # Return None on login failure
-    except Exception as e:
-        st.error(f"An unexpected error occurred during login: {e}")
-        return None
+def login(retries=3, delay=5):
+    """
+    Handles login with retries and checkpoint challenge handling.
+    """
+    for attempt in range(retries):
+        try:
+            api = Client(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            save_session(api)
+            st.success("Logged in successfully.")
+            return api
+        except ClientLoginError as e:
+            st.error(f"Login error: {e}")
+            return None  # Return None on general login error after all retries
+        except ClientCheckpointChallengeError as e:
+            st.warning(f"Checkpoint challenge required: {e}")
+            st.warning(f"Attempt {attempt + 1} of {retries}. Retrying in {delay} seconds...")
+            time.sleep(delay)  # Wait before retrying
+            if attempt + 1 == retries:
+                st.error("Max retries reached.  Login failed.")
+                return None  # Return None after max retries
+        except Exception as e:
+            st.error(f"An unexpected error occurred during login: {e}")
+            return None
 
 def get_api():
     api = load_session()
     if api:
         try:
-            api.current_user()  # Check if the session is still valid
+            api.current_user()
             st.info("Using existing session.")
             return api
         except (ClientCookieExpiredError, ClientLoginError):
             st.warning("Session expired or invalid. Logging in again.")
-            api = login()  # Re-login
+            api = login()
             if api:
                 return api
             else:
-                return None # Return None if login fails
+                return None
         except Exception as e:
             st.error(f"Error checking session validity: {e}")
             return None
@@ -236,7 +248,7 @@ if uploaded_file:
     if st.button("📸 Post to Instagram"):
         try:
             api = get_api()
-            if api: # only proceed if api is not None
+            if api:
                 upload_result = api.upload_photo(temp_image_path, caption=final_caption)
                 st.success(f"✅ Image posted successfully! Media ID: {upload_result.get('media_id')}")
             else:
