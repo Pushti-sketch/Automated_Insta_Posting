@@ -106,35 +106,39 @@ def generate_caption_test():
         st.error(f"Error during test caption generation: {e}")
         return None
 
-# Function to download audio using yt-dlp
-def download_audio(spotify_url, save_path):
+# Function to download audio from the first YouTube search result
+def download_audio_from_youtube(song_name, save_path):
+    search_query = f"audio {song_name}"
     command = [
         "yt-dlp",
         "--extract-audio",
         "--audio-format", "mp3",
         "-o", save_path,
-        spotify_url
+        f"ytsearch1:{search_query}"  # Search YouTube for the first result
     ]
-    subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    process = subprocess.run(command, capture_output=True)
+    return process
 
 # --- Streamlit UI ---
 st.title("🎵 Instagram Uploader with Music + Caption Generation")
 
-# Spotify URL input
-spotify_url = st.text_input("Enter Spotify URL (fallback to YouTube)", placeholder="https://open.spotify.com/track/...")
+# Song name input
+song_name = st.text_input("Enter Song Name to Fetch from YouTube", placeholder="e.g., Bohemian Rhapsody")
 
 temp_dir = tempfile.mkdtemp()
+audio_downloaded = False
 
-if spotify_url:
-    with st.spinner("Downloading audio..."):
+if song_name:
+    with st.spinner(f"Searching YouTube and downloading audio for '{song_name}'..."):
         raw_audio_path = os.path.join(temp_dir, "track.%(ext)s")
         final_audio_path = os.path.join(temp_dir, "track.mp3")
-        process = subprocess.run(["yt-dlp", "--extract-audio", "--audio-format", "mp3", "-o", raw_audio_path, spotify_url], capture_output=True)
+        process = download_audio_from_youtube(song_name, raw_audio_path)
 
         if os.path.exists(final_audio_path):
             st.success("✅ Audio downloaded!")
             audio = AudioSegment.from_file(final_audio_path, format="mp3")
             total_duration = int(audio.duration_seconds)
+            audio_downloaded = True
 
             # Range slider for trimming
             start_sec, end_sec = st.slider("🎧 Select trim range (seconds)", 0, total_duration, (0, min(15, total_duration)), step=1)
@@ -151,7 +155,7 @@ if spotify_url:
             st.session_state['audio_clip_range'] = (start_sec, end_sec)
         else:
             error_message = process.stderr.decode('utf-8')
-            st.error(f"❌ Failed to download audio. Try another link. Error from yt-dlp: {error_message}")
+            st.error(f"❌ Failed to download audio for '{song_name}'. Error from yt-dlp: {error_message}")
 
 # Image/Video upload for Instagram
 uploaded_file = st.file_uploader("Upload an image or video", type=["jpg", "jpeg", "png", "mp4"])
@@ -210,7 +214,7 @@ if uploaded_file:
             st.error(f"Error during Instagram post: {e}")
 
     # Add selected music to video/image
-    if "audio_clip_path" in st.session_state:
+    if "audio_clip_path" in st.session_state and audio_downloaded:
         audio_path = st.session_state["audio_clip_path"]
         audio_clip = AudioFileClip(audio_path)
         audio_duration = audio_clip.duration
