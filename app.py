@@ -74,7 +74,6 @@ def generate_caption(image_path):
 
     # Return the generated caption text from the response
     return response.text.strip()
-
 # Function to download audio using yt-dlp
 def download_audio(spotify_url, save_path):
     command = [
