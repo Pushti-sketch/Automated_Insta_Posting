@@ -9,11 +9,12 @@ from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginE
 from google import genai
 from google.genai.types import HttpOptions
 
-# --- Load from secrets ---
-INSTAGRAM_USERNAME = st.secrets["instagram_username"]
-INSTAGRAM_PASSWORD = st.secrets["instagram_password"]
-GEMINI_API_KEY = st.secrets["gemini_api_key"]
-SESSION_FILE = st.secrets["session_file"]
+# --- Fallback for Local Development ---
+# Use default values when secrets are not available (for local development)
+INSTAGRAM_USERNAME = st.secrets.get("instagram_username", "default_instagram_username")
+INSTAGRAM_PASSWORD = st.secrets.get("instagram_password", "default_instagram_password")
+GEMINI_API_KEY = st.secrets.get("gemini_api_key", "default_gemini_api_key")
+SESSION_FILE = st.secrets.get("session_file", "default_session_file.pkl")
 
 # Predefined user groups
 usernames_of_group = ['group_user1', 'group_user2']
