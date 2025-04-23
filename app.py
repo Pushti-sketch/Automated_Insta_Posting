@@ -61,23 +61,23 @@ def get_api():
 client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(api_version="v1"))
 
 def generate_caption(image_path):
-    # Open the image and convert it to bytes
-    with open(image_path, 'rb') as img_file:
+    with open(image_path, "rb") as img_file:
         img_data = img_file.read()
 
-    # Prepare the contents parameter
-    contents = [{
-        "parts": [{"text": "Generate a creative, concise Instagram caption for this image. Only return the caption, nothing else."}],
-        "inline_data": {"mime_type": "image/jpeg", "data": img_data}
-    }]
-
-    # Request the generative AI model to create a caption for the image
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-001",
-        contents=contents
+    # Create a Content object with typed Parts and inline_data
+    content = Content(
+        parts=[
+            Part(text="Generate a creative, concise Instagram caption for this image. Only return the caption, nothing else."),
+            Part(inline_data={"mime_type": "image/jpeg", "data": img_data})
+        ]
     )
 
-    # Return the generated caption text from the response
+    # Generate caption
+    response = client.models.generate_content(
+        model="gemini-2.0-flash-001",
+        contents=[content]
+    )
+
     return response.text.strip()
 # Function to download audio using yt-dlp
 def download_audio(spotify_url, save_path):
