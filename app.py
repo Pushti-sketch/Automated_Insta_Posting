@@ -8,6 +8,8 @@ import pickle
 from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginError
 from google import genai
 from google.genai.types import HttpOptions
+from PIL import Image
+import io
 
 # --- Fallback for Local Development ---
 # Use default values when secrets are not available (for local development)
