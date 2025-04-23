@@ -7,7 +7,7 @@ from moviepy import VideoFileClip, AudioFileClip, ImageClip
 import pickle
 from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginError
 from google import genai
-from google.genai.types import HttpOptions
+from google.genai.types import HttpOptions,Content, Part, Blob
 from PIL import Image
 import io
 
