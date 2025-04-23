@@ -6,7 +6,8 @@ from pydub import AudioSegment
 from moviepy import VideoFileClip, AudioFileClip, ImageClip
 import pickle
 from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginError
-from google.generativeai import Client as GenerativeClient
+from google import genai
+from google.genai.types import HttpOptions
 
 # --- Load from secrets ---
 INSTAGRAM_USERNAME = st.secrets["instagram_username"]
@@ -54,23 +55,24 @@ def get_api():
     return login()
 
 # --- Caption Generation with Google Generative AI ---
+client = genai.Client(http_options=HttpOptions(api_version="v1"))
+
 def generate_caption(image_path):
     # Initialize the Google Generative AI Client with your API key
-    client = GenerativeClient(api_key=GEMINI_API_KEY)
-    
     with open(image_path, 'rb') as img_file:
         img_data = img_file.read()
 
-    # Requesting the generative AI model to create a caption
-    response = client.generate_content(
-        model="gemini-2.0-pro-vision",
+    # Requesting the generative AI model to create a caption for the image
+    response = client.models.generate_content(
+        model="gemini-2.0-flash-001",  # Use the correct model ID
         contents=[{
             "parts": [{"text": "Generate a creative, concise Instagram caption for this image. Only return the caption, nothing else."}],
             "inline_data": {"mime_type": "image/jpeg", "data": img_data}
         }]
     )
 
-    return response.candidates[0].content.parts[0].text.strip()
+    # Return the generated caption text from the response
+    return response.text.strip()
 
 # Function to download audio using yt-dlp
 def download_audio(spotify_url, save_path):
