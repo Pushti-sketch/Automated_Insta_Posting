@@ -1,6 +1,6 @@
 streamlit
 instagram-private-api
-google-generativeai
+google-genai
 yt-dlp
 pydub
 moviepy
