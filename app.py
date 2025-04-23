@@ -5,7 +5,7 @@ import subprocess
 from pydub import AudioSegment
 from moviepy import VideoFileClip, AudioFileClip, ImageClip
 import pickle
-from instagram_web_api import Client, ClientError, ClientLoginError, ClientCookieExpiredError  # Changed import
+from instagram_web_api import Client
 from google import genai
 from google.genai.types import HttpOptions, Content, Part
 from PIL import Image
