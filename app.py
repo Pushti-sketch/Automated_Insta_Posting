@@ -10,6 +10,7 @@ from google import genai
 from google.genai.types import HttpOptions, Content, Part
 from PIL import Image
 import io
+import ffmpeg  # Import the ffmpeg Python wrapper
 
 # --- Fallback for Local Development ---
 # Use default values when secrets are not available (for local development)
@@ -114,7 +115,7 @@ def download_audio_from_youtube(song_name, save_path):
         "--extract-audio",
         "--audio-format", "mp3",
         "-o", save_path,
-        f"ytsearch1:{search_query}"  # Search YouTube for the first result
+        f"ytsearch1:{search_query}"
     ]
     process = subprocess.run(command, capture_output=True)
     return process
