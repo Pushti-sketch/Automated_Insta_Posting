@@ -56,7 +56,7 @@ def get_api():
     return login()
 
 # --- Caption Generation with Google Generative AI ---
-client = genai.Client(http_options=HttpOptions(api_version="v1"))
+client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(api_version="v1"))
 
 def generate_caption(image_path):
     # Initialize the Google Generative AI Client with your API key
