@@ -3,11 +3,10 @@ import tempfile
 import os
 import subprocess
 from pydub import AudioSegment
-from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip
+from moviepy import VideoFileClip, AudioFileClip, ImageClip
 import pickle
 from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginError
-from google import genai
-from google.genai import types
+from google.generativeai import Client as GenerativeClient
 
 # --- Load from secrets ---
 INSTAGRAM_USERNAME = st.secrets["instagram_username"]
@@ -35,7 +34,8 @@ def load_session():
         )
 
 def login():
-    api = Client(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+    api = Client()
+    api.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
     save_session(api)
     return api
 
@@ -53,19 +53,23 @@ def get_api():
     st.info("🔐 Logging in...")
     return login()
 
-# --- Caption Generation ---
+# --- Caption Generation with Google Generative AI ---
 def generate_caption(image_path):
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    # Initialize the Google Generative AI Client with your API key
+    client = GenerativeClient(api_key=GEMINI_API_KEY)
+    
     with open(image_path, 'rb') as img_file:
         img_data = img_file.read()
-    response = client.models.generate_content(
+
+    # Requesting the generative AI model to create a caption
+    response = client.generate_content(
         model="gemini-2.0-pro-vision",
         contents=[{
             "parts": [{"text": "Generate a creative, concise Instagram caption for this image. Only return the caption, nothing else."}],
             "inline_data": {"mime_type": "image/jpeg", "data": img_data}
-        }],
-        config=types.GenerateContentConfig(response_modalities=["Text"])
+        }]
     )
+
     return response.candidates[0].content.parts[0].text.strip()
 
 # Function to download audio using yt-dlp
@@ -84,6 +88,7 @@ st.title("🎵 Instagram Uploader with Music + Caption Generation")
 
 # Spotify URL input
 spotify_url = st.text_input("Enter Spotify URL (fallback to YouTube)", placeholder="https://open.spotify.com/track/...")
+
 temp_dir = tempfile.mkdtemp()
 
 if spotify_url:
@@ -140,7 +145,7 @@ if uploaded_file:
 
     st.image(temp_image_path, caption="Preview", use_column_width=True)
 
-    if st.button("Generate Caption with Gemini"):
+    if st.button("Generate Caption with Google Generative AI"):
         generated_caption = generate_caption(temp_image_path)
         st.session_state["generated_caption"] = generated_caption
         st.success("Caption generated!")
@@ -161,14 +166,13 @@ if uploaded_file:
         audio_path = st.session_state["audio_clip_path"]
         audio_clip = AudioFileClip(audio_path)
 
-        if uploaded_file.name.lower().endswith(('jpg', 'jpeg', 'png')):
+        if uploaded_file.name.lower().endswith(('jpg', 'jpeg', 'png')):  # Image
             # Convert image to 15s video with music
             img_clip = ImageClip(temp_image_path).set_duration(audio_clip.duration).set_fps(24)
             img_clip = img_clip.set_audio(audio_clip)
             output_path = os.path.join(temp_dir, "final_video.mp4")
             img_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
-        else:
-            # Replace video audio
+        else:  # Video
             video = VideoFileClip(temp_image_path)
             final_video = video.set_audio(audio_clip)
             output_path = os.path.join(temp_dir, "final_video.mp4")
@@ -177,11 +181,23 @@ if uploaded_file:
         st.video(output_path)
 
         # Option to upload to Instagram
-        if st.button("🚀 Upload Post"):
+        if st.button("🚀 Upload Reels"):
             try:
                 api = get_api()
-                user_tags = [{"username": u} for u in selected_mentions]
-                api.post_video(output_path, caption=final_caption, user_tags=user_tags)
-                st.success("✅ Post uploaded successfully!")
+
+                # Prepare media file and cover
+                video_path = output_path
+                cover_image_path = temp_image_path  # Use the uploaded image as the cover
+
+                # Upload to Instagram Reels
+                media = api.video_upload_to_reel(video_path, caption=final_caption, cover=cover_image_path)
+
+                # Tag users in the video
+                for username in selected_mentions:
+                    user = api.user_info_by_username(username)
+                    api.media_like(media.pk)
+                    api.media_comment(media.pk, f"@{username}")
+
+                st.success("✅ Reels video uploaded successfully!")
             except Exception as e:
                 st.error(f"Error: {e}")
