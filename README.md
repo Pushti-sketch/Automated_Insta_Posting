@@ -1,5 +1,3 @@
-Absolutely! Here's a cool, detailed README for your Streamlit app. This will guide users through the setup and usage of the app in a fun and friendly way.
-
 ---
 
 # **Instagram Uploader with Music & Gemini Caption Generator 🎥🎶**
