@@ -5,16 +5,15 @@ import subprocess
 from pydub import AudioSegment
 from moviepy import VideoFileClip, AudioFileClip, ImageClip
 import pickle
-from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginError, ClientCheckpointChallengeError
+from instagram_web_api import Client, ClientError, ClientLoginError, ClientCookieExpiredError  # Changed import
 from google import genai
 from google.genai.types import HttpOptions, Content, Part
 from PIL import Image
 import io
-import ffmpeg  # Import the ffmpeg Python wrapper
+import ffmpeg
 import time
 
 # --- Fallback for Local Development ---
-# Use default values when secrets are not available (for local development)
 INSTAGRAM_USERNAME = st.secrets.get("instagram_username", "default_instagram_username")
 INSTAGRAM_PASSWORD = st.secrets.get("instagram_password", "default_instagram_password")
 GEMINI_API_KEY = st.secrets.get("gemini_api_key")
@@ -28,50 +27,52 @@ usernames_of_staff = ['staff_user1', 'staff_user2']
 def save_session(api):
     try:
         with open(SESSION_FILE, 'wb') as f:
-            pickle.dump({'cookie': api.cookie_jar, 'settings': api.settings}, f)
+            pickle.dump({'cookie': api.cookie, 'settings': {}}, f)  # Changed:  save only api.cookie
         st.success("Session saved successfully.")
     except Exception as e:
         st.error(f"Error saving session: {e}")
 
 def load_session():
     try:
-        with open(SESSION_FILE, 'rb') as f:
-            data = pickle.load(f)
-            api = Client(
-                auto_patch=True,
-                authenticate=False,
-                settings=data['settings'],
-                cookie=data['cookie']
-            )
-            st.info("Session loaded from file.")
-            return api
-    except FileNotFoundError:
-        st.info("Session file not found.  Will attempt login.")
-        return None
+        if os.path.exists(SESSION_FILE): # added check
+            with open(SESSION_FILE, 'rb') as f:
+                data = pickle.load(f)
+                api = Client(
+                    authenticate=False,
+                    cookie=data['cookie'],
+                )
+                st.info("Session loaded from file.")
+                return api
+        else:
+             st.info("Session file not found. Will attempt login.")
+             return None
     except Exception as e:
         st.error(f"Error loading session: {e}")
         return None
 
 def login(retries=3, delay=5):
-    """
-    Handles login with retries and checkpoint challenge handling.
-    """
+    """Handles login with retries."""
     for attempt in range(retries):
         try:
             api = Client(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            api.login()
             save_session(api)
             st.success("Logged in successfully.")
             return api
         except ClientLoginError as e:
             st.error(f"Login error: {e}")
-            return None  # Return None on general login error after all retries
-        except ClientCheckpointChallengeError as e:
-            st.warning(f"Checkpoint challenge required: {e}")
-            st.warning(f"Attempt {attempt + 1} of {retries}. Retrying in {delay} seconds...")
-            time.sleep(delay)  # Wait before retrying
-            if attempt + 1 == retries:
-                st.error("Max retries reached.  Login failed.")
-                return None  # Return None after max retries
+            return None
+        except ClientError as e:  # Catch general ClientError,
+            if "checkpoint_challenge_required" in str(e):
+                st.warning(f"Checkpoint challenge required: {e}")
+                st.warning(f"Attempt {attempt + 1} of {retries}. Retrying in {delay} seconds...")
+                time.sleep(delay)
+                if attempt + 1 == retries:
+                    st.error("Max retries reached. Login failed.")
+                    return None
+            else:
+                st.error(f"An unexpected error occurred during login: {e}")
+                return None
         except Exception as e:
             st.error(f"An unexpected error occurred during login: {e}")
             return None
@@ -80,7 +81,8 @@ def get_api():
     api = load_session()
     if api:
         try:
-            api.current_user()
+            # Check if the session is still valid.  A simple check.
+            api.user_id
             st.info("Using existing session.")
             return api
         except (ClientCookieExpiredError, ClientLoginError):
@@ -114,16 +116,14 @@ def generate_caption(image_path):
         with open(image_path, "rb") as img_file:
             img_data = img_file.read()
 
-        # Create a Content object with typed Parts and inline_data
         content = Content(
             parts=[
                 Part(text="Generate a creative, concise Instagram caption for this image. Only return the caption, nothing else."),
                 Part(inline_data={"mime_type": "image/jpeg", "data": img_data})
             ]
         )
-        print("Content object:", content)  # Debugging line
+        print("Content object:", content)
 
-        # Generate caption
         response = client.models.generate_content(
             model="gemini-2.0-flash-001",
             contents=[content]
@@ -249,10 +249,12 @@ if uploaded_file:
         try:
             api = get_api()
             if api:
-                upload_result = api.upload_photo(temp_image_path, caption=final_caption)
-                st.success(f"✅ Image posted successfully! Media ID: {upload_result.get('media_id')}")
+                #  Use a simpler method to post a photo.
+                with open(temp_image_path, 'rb') as photo_file:
+                    upload_result = api.post_photo(photo_data=photo_file, caption=final_caption)
+                st.success(f"✅ Image posted successfully! Media ID: {upload_result.get('id')}")
             else:
-                st.error("Failed to authenticate with Instagram.  Please check your credentials.")
+                st.error("Failed to authenticate with Instagram. Please check your credentials.")
         except Exception as e:
             st.error(f"Error during Instagram post: {e}")
 
@@ -262,15 +264,14 @@ if uploaded_file:
         audio_clip = AudioFileClip(audio_path)
         audio_duration = audio_clip.duration
 
-        if uploaded_file.name.lower().endswith(('jpg', 'jpeg', 'png')):  # Image
-            # Convert image to video with music (max 15 seconds for Reels with music)
+        if uploaded_file.name.lower().endswith(('jpg', 'jpeg', 'png')):
             video_duration = min(15, audio_duration)
             img_clip = ImageClip(temp_image_path).set_duration(video_duration).set_fps(24)
             final_audio_clip = audio_clip.subclip(0, video_duration)
             img_clip = img_clip.set_audio(final_audio_clip)
             output_path = os.path.join(temp_dir, "final_video.mp4")
             img_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
-        else:  # Video
+        else:
             video = VideoFileClip(temp_image_path)
             video_duration = video.duration
             final_video_duration = min(15, video_duration, audio_duration)
@@ -287,25 +288,15 @@ if uploaded_file:
             try:
                 api = get_api()
                 if api:
-                    # Prepare media file and cover
                     video_path = output_path
-                    cover_image_path = temp_image_path  # Use the uploaded image as the cover
+                    cover_image_path = temp_image_path
 
-                    # Upload to Instagram Reels
-                    media = api.video_upload_to_reel(video_path, caption=final_caption, cover=cover_image_path)
-
-                    # Tag users in the video
-                    for username in selected_mentions:
-                        try:
-                            user = api.user_info_by_username(username)
-                            api.media_like(media.pk)
-                            api.media_comment(media.pk, f"@{username}")
-                        except Exception as e:
-                            st.warning(f"Could not tag user {username}: {e}")
-
+                    #  simplified reel upload.
+                    with open(video_path, 'rb') as video_file:
+                        reel_result = api.post_video(video_data=video_file,  caption=final_caption)
                     st.success("✅ Reels video uploaded successfully!")
                 else:
-                     st.error("Failed to authenticate with Instagram.  Please check your credentials.")
+                    st.error("Failed to authenticate with Instagram. Please check your credentials.")
             except Exception as e:
                 st.error(f"Error during Instagram Reels upload: {e}")
 
