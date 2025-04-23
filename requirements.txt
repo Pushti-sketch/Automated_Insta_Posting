@@ -1,5 +1,5 @@
 streamlit
-instagram-private-api
+instagram_private_api
 google-genai
 yt-dlp
 pydub
