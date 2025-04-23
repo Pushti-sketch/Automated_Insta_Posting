@@ -25,38 +25,65 @@ usernames_of_staff = ['staff_user1', 'staff_user2']
 
 # --- Session Handling ---
 def save_session(api):
-    with open(SESSION_FILE, 'wb') as f:
-        pickle.dump({'cookie': api.cookie_jar, 'settings': api.settings}, f)
+    try:
+        with open(SESSION_FILE, 'wb') as f:
+            pickle.dump({'cookie': api.cookie_jar, 'settings': api.settings}, f)
+        st.success("Session saved successfully.")  # Add success message
+    except Exception as e:
+        st.error(f"Error saving session: {e}")
 
 def load_session():
-    with open(SESSION_FILE, 'rb') as f:
-        data = pickle.load(f)
-        return Client(
-            auto_patch=True,
-            authenticate=False,
-            settings=data['settings'],
-            cookie=data['cookie']
-        )
+    try:
+        with open(SESSION_FILE, 'rb') as f:
+            data = pickle.load(f)
+            api = Client(
+                auto_patch=True,
+                authenticate=False,
+                settings=data['settings'],
+                cookie=data['cookie']
+            )
+            st.info("Session loaded from file.")
+            return api
+    except FileNotFoundError:
+        st.info("Session file not found.  Will attempt login.")
+        return None  # Return None if the file doesn't exist
+    except Exception as e:
+        st.error(f"Error loading session: {e}")
+        return None
 
 def login():
-    api = Client()
-    api.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-    save_session(api)
-    return api
+    try:
+        api = Client(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+        save_session(api)
+        st.success("Logged in successfully.")
+        return api
+    except ClientLoginError as e:
+        st.error(f"Login error: {e}")
+        return None  # Return None on login failure
+    except Exception as e:
+        st.error(f"An unexpected error occurred during login: {e}")
+        return None
 
 def get_api():
-    if os.path.exists(SESSION_FILE):
+    api = load_session()
+    if api:
         try:
-            st.info("🔁 Loading saved session...")
-            api = load_session()
-            api.current_user()
-            st.success("✅ Logged in using saved session.")
+            api.current_user()  # Check if the session is still valid
+            st.info("Using existing session.")
             return api
         except (ClientCookieExpiredError, ClientLoginError):
-            st.warning("❌ Session expired. Logging in again...")
-
-    st.info("🔐 Logging in...")
-    return login()
+            st.warning("Session expired or invalid. Logging in again.")
+            api = login()  # Re-login
+            if api:
+                return api
+            else:
+                return None # Return None if login fails
+        except Exception as e:
+            st.error(f"Error checking session validity: {e}")
+            return None
+    else:
+        api = login()
+        return api
 
 # --- Caption Generation with Google Generative AI ---
 client = None
@@ -209,8 +236,11 @@ if uploaded_file:
     if st.button("📸 Post to Instagram"):
         try:
             api = get_api()
-            upload_result = api.upload_photo(temp_image_path, caption=final_caption)
-            st.success(f"✅ Image posted successfully! Media ID: {upload_result.get('media_id')}")
+            if api: # only proceed if api is not None
+                upload_result = api.upload_photo(temp_image_path, caption=final_caption)
+                st.success(f"✅ Image posted successfully! Media ID: {upload_result.get('media_id')}")
+            else:
+                st.error("Failed to authenticate with Instagram.  Please check your credentials.")
         except Exception as e:
             st.error(f"Error during Instagram post: {e}")
 
@@ -244,24 +274,26 @@ if uploaded_file:
         if st.button("🚀 Upload Reels"):
             try:
                 api = get_api()
+                if api:
+                    # Prepare media file and cover
+                    video_path = output_path
+                    cover_image_path = temp_image_path  # Use the uploaded image as the cover
 
-                # Prepare media file and cover
-                video_path = output_path
-                cover_image_path = temp_image_path  # Use the uploaded image as the cover
+                    # Upload to Instagram Reels
+                    media = api.video_upload_to_reel(video_path, caption=final_caption, cover=cover_image_path)
 
-                # Upload to Instagram Reels
-                media = api.video_upload_to_reel(video_path, caption=final_caption, cover=cover_image_path)
+                    # Tag users in the video
+                    for username in selected_mentions:
+                        try:
+                            user = api.user_info_by_username(username)
+                            api.media_like(media.pk)
+                            api.media_comment(media.pk, f"@{username}")
+                        except Exception as e:
+                            st.warning(f"Could not tag user {username}: {e}")
 
-                # Tag users in the video
-                for username in selected_mentions:
-                    try:
-                        user = api.user_info_by_username(username)
-                        api.media_like(media.pk)
-                        api.media_comment(media.pk, f"@{username}")
-                    except Exception as e:
-                        st.warning(f"Could not tag user {username}: {e}")
-
-                st.success("✅ Reels video uploaded successfully!")
+                    st.success("✅ Reels video uploaded successfully!")
+                else:
+                     st.error("Failed to authenticate with Instagram.  Please check your credentials.")
             except Exception as e:
                 st.error(f"Error during Instagram Reels upload: {e}")
 
