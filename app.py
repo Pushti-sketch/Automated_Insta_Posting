@@ -7,7 +7,7 @@ from moviepy import VideoFileClip, AudioFileClip, ImageClip
 import pickle
 from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginError
 from google import genai
-from google.genai.types import HttpOptions,Content, Part, Blob
+from google.genai.types import HttpOptions, Content, Part
 from PIL import Image
 import io
 
@@ -61,24 +61,40 @@ def get_api():
 client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(api_version="v1"))
 
 def generate_caption(image_path):
-    with open(image_path, "rb") as img_file:
-        img_data = img_file.read()
+    try:
+        with open(image_path, "rb") as img_file:
+            img_data = img_file.read()
 
-    # Create a Content object with typed Parts and inline_data
-    content = Content(
-        parts=[
-            Part(text="Generate a creative, concise Instagram caption for this image. Only return the caption, nothing else."),
-            Part(inline_data={"mime_type": "image/jpeg", "data": img_data})
-        ]
-    )
+        # Create a Content object with typed Parts and inline_data
+        content = Content(
+            parts=[
+                Part(text="Generate a creative, concise Instagram caption for this image. Only return the caption, nothing else."),
+                Part(inline_data={"mime_type": "image/jpeg", "data": img_data})
+            ]
+        )
+        print("Content object:", content)  # Debugging line
 
-    # Generate caption
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-001",
-        contents=[content]
-    )
+        # Generate caption
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-001",
+            contents=[content]
+        )
+        return response.text.strip()
+    except Exception as e:
+        st.error(f"Error during caption generation: {e}")
+        return None
 
-    return response.text.strip()
+def generate_caption_test():
+    try:
+        response = client.models.generate_content(
+            model="gemini-pro",
+            contents="Write a short, creative caption."
+        )
+        return response.text.strip()
+    except Exception as e:
+        st.error(f"Error during test caption generation: {e}")
+        return None
+
 # Function to download audio using yt-dlp
 def download_audio(spotify_url, save_path):
     command = [
@@ -154,8 +170,14 @@ if uploaded_file:
 
     if st.button("Generate Caption with Google Generative AI"):
         generated_caption = generate_caption(temp_image_path)
-        st.session_state["generated_caption"] = generated_caption
-        st.success("Caption generated!")
+        if generated_caption:
+            st.session_state["generated_caption"] = generated_caption
+            st.success("Caption generated!")
+
+    if st.button("Test Caption"):
+        test_caption = generate_caption_test()
+        if test_caption:
+            st.write(f"Test Caption: {test_caption}")
 
 # Choose caption
 use_generated = st.radio("Use generated caption?", ["Yes", "No"])
@@ -201,10 +223,17 @@ if uploaded_file:
 
                 # Tag users in the video
                 for username in selected_mentions:
-                    user = api.user_info_by_username(username)
-                    api.media_like(media.pk)
-                    api.media_comment(media.pk, f"@{username}")
+                    try:
+                        user = api.user_info_by_username(username)
+                        api.media_like(media.pk)
+                        api.media_comment(media.pk, f"@{username}")
+                    except Exception as e:
+                        st.warning(f"Could not tag user {username}: {e}")
 
                 st.success("✅ Reels video uploaded successfully!")
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Error during Instagram upload: {e}")
+
+# Clean up temporary directory
+# import shutil
+# shutil.rmtree(temp_dir)
