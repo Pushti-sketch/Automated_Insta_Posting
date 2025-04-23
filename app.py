@@ -15,7 +15,7 @@ import io
 # Use default values when secrets are not available (for local development)
 INSTAGRAM_USERNAME = st.secrets.get("instagram_username", "default_instagram_username")
 INSTAGRAM_PASSWORD = st.secrets.get("instagram_password", "default_instagram_password")
-GEMINI_API_KEY = st.secrets.get("gemini_api_key", "default_gemini_api_key")
+GEMINI_API_KEY = st.secrets.get("gemini_api_key")
 SESSION_FILE = st.secrets.get("session_file", "default_session_file.pkl")
 
 # Predefined user groups
@@ -58,9 +58,18 @@ def get_api():
     return login()
 
 # --- Caption Generation with Google Generative AI ---
-client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(api_version="v1"))
+client = None
+if GEMINI_API_KEY:
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(api_version="v1"))
+    except Exception as e:
+        st.error(f"Error initializing Gemini API client: {e}")
+else:
+    st.error("Gemini API key not found in Streamlit secrets!")
 
 def generate_caption(image_path):
+    if client is None:
+        return None
     try:
         with open(image_path, "rb") as img_file:
             img_data = img_file.read()
@@ -85,6 +94,8 @@ def generate_caption(image_path):
         return None
 
 def generate_caption_test():
+    if client is None:
+        return None
     try:
         response = client.models.generate_content(
             model="gemini-pro",
@@ -118,7 +129,7 @@ if spotify_url:
     with st.spinner("Downloading audio..."):
         raw_audio_path = os.path.join(temp_dir, "track.%(ext)s")
         final_audio_path = os.path.join(temp_dir, "track.mp3")
-        download_audio(spotify_url, raw_audio_path)
+        subprocess.run(["yt-dlp", "--extract-audio", "--audio-format", "mp3", "-o", raw_audio_path, spotify_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         # Ensure file was saved
         if os.path.exists(final_audio_path):
@@ -168,13 +179,13 @@ if uploaded_file:
 
     st.image(temp_image_path, caption="Preview", use_column_width=True)
 
-    if st.button("Generate Caption with Google Generative AI"):
+    if st.button("Generate Caption with Google Generative AI") and client:
         generated_caption = generate_caption(temp_image_path)
         if generated_caption:
             st.session_state["generated_caption"] = generated_caption
             st.success("Caption generated!")
 
-    if st.button("Test Caption"):
+    if st.button("Test Caption") and client:
         test_caption = generate_caption_test()
         if test_caption:
             st.write(f"Test Caption: {test_caption}")
