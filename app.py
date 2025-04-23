@@ -129,9 +129,8 @@ if spotify_url:
     with st.spinner("Downloading audio..."):
         raw_audio_path = os.path.join(temp_dir, "track.%(ext)s")
         final_audio_path = os.path.join(temp_dir, "track.mp3")
-        subprocess.run(["yt-dlp", "--extract-audio", "--audio-format", "mp3", "-o", raw_audio_path, spotify_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        process = subprocess.run(["yt-dlp", "--extract-audio", "--audio-format", "mp3", "-o", raw_audio_path, spotify_url], capture_output=True)
 
-        # Ensure file was saved
         if os.path.exists(final_audio_path):
             st.success("✅ Audio downloaded!")
             audio = AudioSegment.from_file(final_audio_path, format="mp3")
@@ -151,7 +150,8 @@ if spotify_url:
             st.session_state['audio_clip_path'] = trimmed_path
             st.session_state['audio_clip_range'] = (start_sec, end_sec)
         else:
-            st.error("❌ Failed to download audio. Try another link.")
+            error_message = process.stderr.decode('utf-8')
+            st.error(f"❌ Failed to download audio. Try another link. Error from yt-dlp: {error_message}")
 
 # Image/Video upload for Instagram
 uploaded_file = st.file_uploader("Upload an image or video", type=["jpg", "jpeg", "png", "mp4"])
@@ -190,37 +190,52 @@ if uploaded_file:
         if test_caption:
             st.write(f"Test Caption: {test_caption}")
 
-# Choose caption
-use_generated = st.radio("Use generated caption?", ["Yes", "No"])
-final_caption = ""
+    # Choose caption
+    use_generated = st.radio("Use generated caption?", ["Yes", "No"])
+    final_caption = ""
 
-if use_generated == "Yes" and "generated_caption" in st.session_state:
-    final_caption = st.session_state["generated_caption"]
-    st.text_area("Generated Caption", final_caption, height=100)
-else:
-    final_caption = st.text_area("Custom Caption", "", height=100)
+    if use_generated == "Yes" and "generated_caption" in st.session_state:
+        final_caption = st.session_state["generated_caption"]
+        st.text_area("Generated Caption", final_caption, height=100)
+    else:
+        final_caption = st.text_area("Custom Caption", "", height=100)
 
-if uploaded_file:
+    # --- Instagram Post Button ---
+    if st.button("📸 Post to Instagram"):
+        try:
+            api = get_api()
+            upload_result = api.upload_photo(temp_image_path, caption=final_caption)
+            st.success(f"✅ Image posted successfully! Media ID: {upload_result.get('media_id')}")
+        except Exception as e:
+            st.error(f"Error during Instagram post: {e}")
+
     # Add selected music to video/image
     if "audio_clip_path" in st.session_state:
         audio_path = st.session_state["audio_clip_path"]
         audio_clip = AudioFileClip(audio_path)
+        audio_duration = audio_clip.duration
 
         if uploaded_file.name.lower().endswith(('jpg', 'jpeg', 'png')):  # Image
-            # Convert image to 15s video with music
-            img_clip = ImageClip(temp_image_path).set_duration(audio_clip.duration).set_fps(24)
-            img_clip = img_clip.set_audio(audio_clip)
+            # Convert image to video with music (max 15 seconds for Reels with music)
+            video_duration = min(15, audio_duration)
+            img_clip = ImageClip(temp_image_path).set_duration(video_duration).set_fps(24)
+            final_audio_clip = audio_clip.subclip(0, video_duration)
+            img_clip = img_clip.set_audio(final_audio_clip)
             output_path = os.path.join(temp_dir, "final_video.mp4")
             img_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
         else:  # Video
             video = VideoFileClip(temp_image_path)
-            final_video = video.set_audio(audio_clip)
+            video_duration = video.duration
+            final_video_duration = min(15, video_duration, audio_duration)
+            final_video = video.subclip(0, final_video_duration)
+            final_audio_clip = audio_clip.subclip(0, final_video_duration)
+            final_video = final_video.set_audio(final_audio_clip)
             output_path = os.path.join(temp_dir, "final_video.mp4")
             final_video.write_videofile(output_path, codec="libx264", audio_codec="aac")
 
         st.video(output_path)
 
-        # Option to upload to Instagram
+        # Option to upload to Instagram Reels
         if st.button("🚀 Upload Reels"):
             try:
                 api = get_api()
@@ -243,8 +258,8 @@ if uploaded_file:
 
                 st.success("✅ Reels video uploaded successfully!")
             except Exception as e:
-                st.error(f"Error during Instagram upload: {e}")
+                st.error(f"Error during Instagram Reels upload: {e}")
 
 # Clean up temporary directory
-# import shutil
-# shutil.rmtree(temp_dir)
+import shutil
+shutil.rmtree(temp_dir, ignore_errors=True)
