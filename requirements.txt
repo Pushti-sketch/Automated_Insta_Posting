@@ -1,3 +1,4 @@
+google.generativeai
 streamlit
 instagram_private_api
 google-genai
