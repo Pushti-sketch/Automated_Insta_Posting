@@ -8,9 +8,6 @@ import google.generativeai as genai
 from instagram_private_api import Client, ClientCookieExpiredError, ClientLoginRequiredError
 from instagram_private_api.errors import ClientError
 import logging
-import threading
-import time
-import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -86,50 +83,38 @@ def generate_caption(model, image_path):
         st.error(f"Failed to generate caption: {e}")
         return "Failed to generate caption. Please try again or use your own caption."
 
-# Function to login to Instagram with retries for challenge_required error
-def instagram_login_with_retries():
-    username = st.secrets["instagram_username"]
-    password = st.secrets["instagram_password"]
-    
-    # Set up retry parameters
-    retry_duration = 60  # seconds (1 minute)
-    start_time = time.time()
-    attempt = 1
-    
-    status_placeholder = st.empty()
-    status_placeholder.info(f"Attempting to login to Instagram... (Attempt {attempt})")
-    
-    while time.time() - start_time < retry_duration:
-        try:
+# Function to login to Instagram with credentials from secrets
+def instagram_login():
+    try:
+        # Get Instagram credentials from Streamlit secrets using the flat structure
+        username = st.secrets["instagram_username"]
+        password = st.secrets["instagram_password"]
+        
+        with st.spinner("Logging in to Instagram..."):
             api = Client(username, password)
             save_instagram_session(api)
-            status_placeholder.success("Successfully logged in to Instagram!")
             return api
-        except Exception as e:
-            error_message = str(e)
-            if isinstance(e, ClientError):
-                try:
-                    error_response = json.loads(e.error_response)
-                    error_message = error_response.get('message', str(e))
-                    error_type = error_response.get('error_type', '')
-                    
-                    # If challenge_required, continue retrying
-                    if 'challenge_required' in error_message or error_type == 'challenge_required':
-                        elapsed = time.time() - start_time
-                        remaining = max(0, retry_duration - elapsed)
-                        attempt += 1
-                        status_placeholder.warning(f"Challenge required. Retrying... (Attempt {attempt}, {remaining:.1f}s remaining)")
-                        time.sleep(0.1)  # Small delay to prevent hammering the API too hard
-                        continue
-                except:
-                    pass
-            
-            # If we've used up our retry time or it's not a challenge_required error
-            if time.time() - start_time >= retry_duration:
-                status_placeholder.error(f"Login failed after 1 minute of retries: {error_message}")
-            else:
-                status_placeholder.error(f"Instagram login failed: {error_message}")
-            return None
+    except Exception as e:
+        error_message = str(e)
+        if isinstance(e, ClientError):
+            try:
+                error_message = json.loads(e.error_response).get('message', str(e))
+            except:
+                pass
+        st.error(f"Instagram login failed: {error_message}")
+        return None
+
+# Function to format mentions for Instagram caption
+def format_mentions(caption, mentions_list):
+    formatted_caption = caption
+    
+    if mentions_list:
+        formatted_caption += "\n\n"
+        for username in mentions_list:
+            if username.strip():  # Skip empty usernames
+                formatted_caption += f"@{username.strip()} "
+    
+    return formatted_caption
 
 # Main function
 def main():
@@ -151,14 +136,24 @@ def main():
         st.session_state.generated_caption = ""
     if 'use_custom_caption' not in st.session_state:
         st.session_state.use_custom_caption = False
-    if 'login_in_progress' not in st.session_state:
-        st.session_state.login_in_progress = False
+    if 'friends_mentions' not in st.session_state:
+        st.session_state.friends_mentions = []
+    if 'brands_mentions' not in st.session_state:
+        st.session_state.brands_mentions = []
+    if 'custom_mentions' not in st.session_state:
+        st.session_state.custom_mentions = ""
+    if 'include_friends' not in st.session_state:
+        st.session_state.include_friends = False
+    if 'include_brands' not in st.session_state:
+        st.session_state.include_brands = False
+    if 'include_custom' not in st.session_state:
+        st.session_state.include_custom = False
     
     # Initialize Gemini model
     if not st.session_state.gemini_model:
         st.session_state.gemini_model = initialize_gemini()
     
-    # Setup sidebar for Instagram authentication
+    # Setup sidebar for Instagram authentication and mentions configuration
     with st.sidebar:
         st.header("Instagram Authentication")
         
@@ -172,15 +167,12 @@ def main():
                 st.success("Logged in using saved session!")
             else:
                 # Login with credentials from secrets
-                if st.button("Login to Instagram", disabled=st.session_state.login_in_progress):
-                    st.session_state.login_in_progress = True
-                    api = instagram_login_with_retries()
-                    st.session_state.login_in_progress = False
-                    
+                if st.button("Login to Instagram"):
+                    api = instagram_login()
                     if api:
                         st.session_state.api = api
                         st.session_state.logged_in = True
-                        st.rerun()  # Refresh UI after successful login
+                        st.success("Successfully logged in!")
         else:
             st.success("Logged in to Instagram")
             if st.button("Logout"):
@@ -193,6 +185,38 @@ def main():
                     
                 st.success("Logged out successfully")
                 st.rerun()
+        
+        # Mentions configuration
+        if st.session_state.logged_in:
+            st.header("Mentions Configuration")
+            
+            # Friends mentions
+            st.subheader("Friends")
+            st.session_state.include_friends = st.checkbox("Include friends in post", value=st.session_state.include_friends)
+            
+            if st.session_state.include_friends:
+                friends_str = st.text_area("Enter friends' usernames (one per line)", 
+                                          value="\n".join(st.session_state.friends_mentions), 
+                                          height=100)
+                st.session_state.friends_mentions = [u for u in friends_str.split("\n") if u.strip()]
+            
+            # Brands mentions
+            st.subheader("Brands")
+            st.session_state.include_brands = st.checkbox("Include brands in post", value=st.session_state.include_brands)
+            
+            if st.session_state.include_brands:
+                brands_str = st.text_area("Enter brand usernames (one per line)", 
+                                         value="\n".join(st.session_state.brands_mentions), 
+                                         height=100)
+                st.session_state.brands_mentions = [u for u in brands_str.split("\n") if u.strip()]
+            
+            # Custom mentions
+            st.subheader("Custom Mentions")
+            st.session_state.include_custom = st.checkbox("Include custom mentions", value=st.session_state.include_custom)
+            
+            if st.session_state.include_custom:
+                st.session_state.custom_mentions = st.text_input("Enter custom mentions (comma or space separated)", 
+                                                               value=st.session_state.custom_mentions)
     
     # Main content area
     if st.session_state.logged_in:
@@ -228,10 +252,31 @@ def main():
                 
                 if st.session_state.use_custom_caption:
                     custom_caption = st.text_area("Your Caption", height=100)
-                    final_caption = custom_caption
+                    base_caption = custom_caption
                 else:
                     st.text_area("AI Generated Caption", value=st.session_state.generated_caption, height=100, disabled=True)
-                    final_caption = st.session_state.generated_caption
+                    base_caption = st.session_state.generated_caption
+                
+                # Preview final caption with mentions
+                st.subheader("Preview Final Caption")
+                
+                # Collect all mentions
+                all_mentions = []
+                if st.session_state.include_friends:
+                    all_mentions.extend(st.session_state.friends_mentions)
+                
+                if st.session_state.include_brands:
+                    all_mentions.extend(st.session_state.brands_mentions)
+                
+                if st.session_state.include_custom and st.session_state.custom_mentions:
+                    # Split by comma or space
+                    custom_mentions = [m.strip() for m in st.session_state.custom_mentions.replace(',', ' ').split()]
+                    all_mentions.extend(custom_mentions)
+                
+                # Format the final caption with mentions
+                final_caption = format_mentions(base_caption, all_mentions)
+                
+                st.text_area("Final Caption (with mentions)", value=final_caption, height=150)
                 
                 # Post to Instagram button
                 if st.button("Post to Instagram"):
@@ -263,8 +308,7 @@ def main():
                         except Exception as e:
                             st.error(f"Failed to post to Instagram: {e}")
     else:
-        if not st.session_state.login_in_progress:
-            st.info("Please log in to Instagram using the sidebar to continue")
+        st.info("Please log in to Instagram using the sidebar to continue")
 
 # Create a secrets.toml file guide if running locally
 if not st.session_state.get('shown_secrets_guide') and not os.path.exists('.streamlit/secrets.toml'):
